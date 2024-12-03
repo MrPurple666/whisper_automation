@@ -1,0 +1,9 @@
+numpy
+cython
+moviepy
+whisper
+yt_dlp
+numba
+torch
+torchaudio
+setuptools
