@@ -21,8 +21,79 @@ cdef class VideoProcessor:
             ydl.download([video_url])
         return output_path
 
+    
     @staticmethod
     def cut_video(str input_path, str start_time, str end_time, str output_path="output.mp4"):
+        """
+        Cut and scale video for vertical format with improved aspect ratio preservation.
+        
+        Strategies:
+        1. Detect original video aspect ratio
+        2. Use intelligent cropping to maintain content focus
+        3. Scale video to vertical format without stretching
+        """
+        # Probe video metadata
+        probe_command = [
+            "ffprobe", 
+            "-v", "error", 
+            "-select_streams", "v:0", 
+            "-count_packets", 
+            "-show_entries", "stream=width,height,display_aspect_ratio,r_frame_rate", 
+            "-of", "csv=p=0", 
+            input_path
+        ]
+        
+        probe_result = subprocess.check_output(probe_command).decode('utf-8').strip().split(',')
+        
+        # Parse video metadata
+        try:
+            width = int(probe_result[0])
+            height = int(probe_result[1])
+            original_aspect_ratio = width / height
+        except (IndexError, ValueError):
+            # Fallback to default scaling if metadata detection fails
+            original_aspect_ratio = 16/9
+
+        # Determine intelligent crop and scale
+        if original_aspect_ratio > 9/16:  # Wider than vertical
+            # Horizontal video: crop from center
+            vf_filter = (
+                f"crop=ih*(9/16):ih,"  # Center crop to 9:16 aspect
+                f"scale=1080:1920,"    # Scale to vertical format
+                "setsar=1:1"           # Set sample aspect ratio to 1:1
+            )
+        else:
+            # Vertical or square video: minimal cropping
+            vf_filter = (
+                f"scale=-2:1920,"      # Height fixed, width auto-scaled
+                "pad=1080:1920:(1080-iw)/2:(1920-ih)/2:color=black"  # Center with black padding
+            )
+
+        # FFmpeg command with improved scaling
+        command = [
+            "ffmpeg",
+            "-i", input_path,
+            "-ss", start_time,
+            "-to", end_time,
+            "-vf", vf_filter,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-strict", "experimental",
+            output_path
+        ]
+
+        # Execute FFmpeg command
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            # Enhanced error logging
+            print(f"FFmpeg Error: {result.stderr}")
+            raise RuntimeError(f"FFmpeg failed to process video: {result.stderr}")
+        
+        return output_path
+
         """Cut video using FFmpeg for vertical format."""
         cdef list command = [
             "ffmpeg",
