@@ -3,7 +3,7 @@ cython
 moviepy
 whisper
 yt_dlp
-numba
-torch
-torchaudio
+numba==0.61.0rc2 #Use RC2 until next release
+torch #Broken on 3.13
+torchaudio #Broken on 3.13
 setuptools
