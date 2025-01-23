@@ -1,0 +1,100 @@
+[
+    {
+        "label": "os",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "os",
+        "description": "os",
+        "detail": "os",
+        "documentation": {}
+    },
+    {
+        "label": "subprocess",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "subprocess",
+        "description": "subprocess",
+        "detail": "subprocess",
+        "documentation": {}
+    },
+    {
+        "label": "YoutubeDL",
+        "importPath": "yt_dlp",
+        "description": "yt_dlp",
+        "isExtraImport": true,
+        "detail": "yt_dlp",
+        "documentation": {}
+    },
+    {
+        "label": "whisper",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "whisper",
+        "description": "whisper",
+        "detail": "whisper",
+        "documentation": {}
+    },
+    {
+        "label": "download_video",
+        "kind": 2,
+        "importPath": "createvid",
+        "description": "createvid",
+        "peekOfCode": "def download_video(video_url, output_path=\"video.mp4\"):\n    \"\"\"Baixa o vídeo do YouTube usando yt-dlp.\"\"\"\n    ydl_opts = {\n        'format': 'mp4',\n        'outtmpl': output_path\n    }\n    with YoutubeDL(ydl_opts) as ydl:\n        ydl.download([video_url])\n    return output_path\ndef cut_video(input_path, start_time, end_time, output_path=\"output.mp4\"):",
+        "detail": "createvid",
+        "documentation": {}
+    },
+    {
+        "label": "cut_video",
+        "kind": 2,
+        "importPath": "createvid",
+        "description": "createvid",
+        "peekOfCode": "def cut_video(input_path, start_time, end_time, output_path=\"output.mp4\"):\n    \"\"\"Corta o vídeo usando FFmpeg para o formato vertical.\"\"\"\n    command = [\n        \"ffmpeg\",\n        \"-i\", input_path,\n        \"-ss\", start_time,\n        \"-to\", end_time,\n        \"-vf\", \"scale=1080:1920,setsar=1:1\",\n        \"-c:v\", \"libx264\",\n        \"-preset\", \"fast\",",
+        "detail": "createvid",
+        "documentation": {}
+    },
+    {
+        "label": "whisper_to_srt",
+        "kind": 2,
+        "importPath": "createvid",
+        "description": "createvid",
+        "peekOfCode": "def whisper_to_srt(whisper_result, subtitles_path):\n    \"\"\"Converte a transcrição do Whisper para o formato SRT.\"\"\"\n    with open(subtitles_path, \"w\", encoding=\"utf-8\") as f:\n        for i, segment in enumerate(whisper_result[\"segments\"]):\n            start = segment[\"start\"]\n            end = segment[\"end\"]\n            text = segment[\"text\"].strip()\n            # Converter para formato HH:MM:SS,MMM\n            def format_time(seconds):\n                hours = int(seconds // 3600)",
+        "detail": "createvid",
+        "documentation": {}
+    },
+    {
+        "label": "generate_subtitles",
+        "kind": 2,
+        "importPath": "createvid",
+        "description": "createvid",
+        "peekOfCode": "def generate_subtitles(input_path, model=\"medium\"):\n    \"\"\"Gera legendas usando Whisper e salva no formato SRT.\"\"\"\n    print(\"Carregando o modelo Whisper...\")\n    whisper_model = whisper.load_model(model)\n    print(\"Transcrevendo o áudio do vídeo...\")\n    result = whisper_model.transcribe(input_path)\n    subtitles_path = \"subtitles.srt\"\n    whisper_to_srt(result, subtitles_path)\n    print(\"Legendas geradas com sucesso.\")\n    return subtitles_path",
+        "detail": "createvid",
+        "documentation": {}
+    },
+    {
+        "label": "validate_srt_format",
+        "kind": 2,
+        "importPath": "createvid",
+        "description": "createvid",
+        "peekOfCode": "def validate_srt_format(subtitles_path):\n    \"\"\"Valida o formato SRT.\"\"\"\n    with open(subtitles_path, 'r', encoding='utf-8') as f:\n        lines = f.readlines()\n    for i, line in enumerate(lines):\n        if \"-->\" in line:\n            timestamps = line.split(\"-->\")\n            if len(timestamps) != 2:\n                raise ValueError(f\"Erro no formato de tempo na linha {i + 1}: {line}\")\n    print(\"Arquivo .srt validado com sucesso.\")",
+        "detail": "createvid",
+        "documentation": {}
+    },
+    {
+        "label": "add_subtitles",
+        "kind": 2,
+        "importPath": "createvid",
+        "description": "createvid",
+        "peekOfCode": "def add_subtitles(video_path, subtitles_path, output_path=\"final_output.mp4\"):\n    \"\"\"Adiciona legendas ao vídeo usando FFmpeg.\"\"\"\n    if not os.path.exists(subtitles_path):\n        raise FileNotFoundError(\"O arquivo de legendas 'subtitles.srt' não foi encontrado.\")\n    # Validar o formato do arquivo SRT\n    validate_srt_format(subtitles_path)\n    # Caminho absoluto para evitar problemas\n    abs_subtitles_path = os.path.abspath(subtitles_path)\n    command = [\n        \"ffmpeg\",",
+        "detail": "createvid",
+        "documentation": {}
+    },
+    {
+        "label": "main",
+        "kind": 2,
+        "importPath": "createvid",
+        "description": "createvid",
+        "peekOfCode": "def main():\n    # Pede o link do vídeo\n    video_url = input(\"Digite o link do vídeo do YouTube: \")\n    # Baixa o vídeo\n    print(\"Baixando o vídeo...\")\n    input_video = download_video(video_url)\n    # Pede os tempos de corte\n    start_time = input(\"Digite o tempo de início (formato HH:MM:SS): \")\n    end_time = input(\"Digite o tempo de término (formato HH:MM:SS): \")\n    # Corta o vídeo",
+        "detail": "createvid",
+        "documentation": {}
+    }
+]
