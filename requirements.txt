@@ -4,6 +4,8 @@ moviepy
 whisper
 yt_dlp
 numba==0.61.0rc2 #Use RC2 until next release
-torch #Broken on 3.13
-torchaudio #Broken on 3.13
+torch #Broken on 3.13, whisper dependencie
+torchaudio #Broken on 3.13, whisper dependencie
 setuptools
+PyQt5
+opencv-python

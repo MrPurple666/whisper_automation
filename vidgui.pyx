@@ -1,280 +1,297 @@
 # vidgui.pyx
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, simpledialog
-import threading
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QProgressBar, QFileDialog, QMessageBox, QFrame, QInputDialog
+)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QImage, QPixmap
 from createvid import VideoProcessor
 import whisper
 import os
 import cv2
-from PIL import Image, ImageTk
+import numpy as np
 
-cdef class VideoProcessingGUI:
-    cdef object root
+cdef class VideoProcessingGUI(QMainWindow):
+    cdef object video_processor
+    cdef str current_video_path
+    cdef object video_cap
+    cdef object preview_timer
+    cdef object status_label
+    cdef object preview_label
+    cdef object progress_bar
     cdef object url_entry
     cdef object start_time_entry
     cdef object end_time_entry
-    cdef object progress_bar
-    cdef object status_label
-    cdef object preview_label
-    cdef str current_video_path
-    cdef object video_cap
-    cdef object preview_thread
 
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Advanced Video Processing Tool")
-        self.root.geometry("800x900")
-        
+        super().__init__()
+        self.video_processor = VideoProcessor()
         self.current_video_path = ""
         self.video_cap = None
-        self.preview_thread = None
-        
-        self._create_widgets()
-        self._setup_preview_area()
-        
-    def _create_widgets(self):
-        # Main Frame
-        main_frame = tk.Frame(self.root)
-        main_frame.pack(padx=20, pady=20, fill=tk.BOTH, expand=True)
-        
-        # Left Column (Controls)
-        left_frame = tk.Frame(main_frame)
-        left_frame.pack(side=tk.LEFT, padx=10, fill=tk.Y)
-        
-        # Video Source Selection
-        tk.Label(left_frame, text="Video Source:", font=("Helvetica", 12, "bold")).pack(pady=(10, 5))
-        
-        source_frame = tk.Frame(left_frame)
-        source_frame.pack(pady=(0, 10))
-        
-        # YouTube URL Input
-        url_subframe = tk.Frame(source_frame)
-        url_subframe.pack(fill=tk.X)
-        
-        tk.Label(url_subframe, text="YouTube URL:").pack(side=tk.LEFT)
-        self.url_entry = tk.Entry(url_subframe, width=30)
-        self.url_entry.pack(side=tk.LEFT, padx=(5, 0))
-        
-        # Local File Selection Button
-        tk.Button(source_frame, text="Select Local Video", command=self._select_local_video).pack(pady=5)
-        
+        self.preview_timer = QTimer()
+        self.preview_timer.timeout.connect(self._update_preview)
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setWindowTitle("Advanced Video Processing Tool")
+        self.setGeometry(100, 100, 1200, 800)
+
+        # Main layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QHBoxLayout(main_widget)
+
+        # Left panel (controls)
+        left_panel = QFrame()
+        left_panel.setFrameShape(QFrame.StyledPanel)
+        left_panel.setFixedWidth(400)
+        left_layout = QVBoxLayout(left_panel)
+
+        # Video source selection
+        source_label = QLabel("Video Source:")
+        source_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        left_layout.addWidget(source_label)
+
+        # YouTube URL input
+        url_layout = QHBoxLayout()
+        url_label = QLabel("YouTube URL:")
+        self.url_entry = QLineEdit()
+        url_layout.addWidget(url_label)
+        url_layout.addWidget(self.url_entry)
+        left_layout.addLayout(url_layout)
+
+        # Local file selection button
+        local_file_button = QPushButton("Select Local Video")
+        local_file_button.clicked.connect(self._select_local_video)
+        left_layout.addWidget(local_file_button)
+
         # Separator
-        ttk.Separator(left_frame, orient='horizontal').pack(fill=tk.X, pady=10)
-        
-        # Time Crop Section
-        tk.Label(left_frame, text="Start Time (HH:MM:SS):").pack()
-        self.start_time_entry = tk.Entry(left_frame, width=20)
-        self.start_time_entry.pack()
-        
-        tk.Label(left_frame, text="End Time (HH:MM:SS):").pack()
-        self.end_time_entry = tk.Entry(left_frame, width=20)
-        self.end_time_entry.pack()
-        
-        # Buttons Section
-        buttons_frame = tk.Frame(left_frame)
-        buttons_frame.pack(pady=20)
-        
-        tk.Button(buttons_frame, text="Download Video", command=self._download_video).pack(side=tk.TOP, pady=5)
-        tk.Button(buttons_frame, text="Cut Video", command=self._cut_video).pack(side=tk.TOP, pady=5)
-        tk.Button(buttons_frame, text="Generate Subtitles", command=self._generate_subtitles).pack(side=tk.TOP, pady=5)
-        tk.Button(buttons_frame, text="Add Subtitles", command=self._add_subtitles).pack(side=tk.TOP, pady=5)
-        
-        # Progress and Status
-        self.progress_bar = ttk.Progressbar(left_frame, orient='horizontal', length=300, mode='determinate')
-        self.progress_bar.pack(pady=10)
-        
-        self.status_label = tk.Label(left_frame, text="Ready", fg="green")
-        self.status_label.pack(pady=10)
-        
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        left_layout.addWidget(separator)
+
+        # Time crop section
+        time_label = QLabel("Time Crop:")
+        time_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        left_layout.addWidget(time_label)
+
+        start_time_label = QLabel("Start Time (HH:MM:SS):")
+        self.start_time_entry = QLineEdit()
+        left_layout.addWidget(start_time_label)
+        left_layout.addWidget(self.start_time_entry)
+
+        end_time_label = QLabel("End Time (HH:MM:SS):")
+        self.end_time_entry = QLineEdit()
+        left_layout.addWidget(end_time_label)
+        left_layout.addWidget(self.end_time_entry)
+
+        # Buttons
+        download_button = QPushButton("Download Video")
+        download_button.clicked.connect(self._download_video)
+        left_layout.addWidget(download_button)
+
+        cut_button = QPushButton("Cut Video")
+        cut_button.clicked.connect(self._cut_video)
+        left_layout.addWidget(cut_button)
+
+        subtitles_button = QPushButton("Generate Subtitles")
+        subtitles_button.clicked.connect(self._generate_subtitles)
+        left_layout.addWidget(subtitles_button)
+
+        add_subtitles_button = QPushButton("Add Subtitles")
+        add_subtitles_button.clicked.connect(self._add_subtitles)
+        left_layout.addWidget(add_subtitles_button)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        left_layout.addWidget(self.progress_bar)
+
+        # Status label
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: green; font-size: 12px;")
+        left_layout.addWidget(self.status_label)
+
+        # Add left panel to main layout
+        main_layout.addWidget(left_panel)
+
+        # Right panel (video preview)
+        right_panel = QFrame()
+        right_panel.setFrameShape(QFrame.StyledPanel)
+        right_layout = QVBoxLayout(right_panel)
+
+        preview_label = QLabel("Video Preview")
+        preview_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        right_layout.addWidget(preview_label)
+
+        self.preview_label = QLabel()
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        right_layout.addWidget(self.preview_label)
+
+        # Preview controls
+        preview_controls_layout = QHBoxLayout()
+        select_timestamp_button = QPushButton("Select Timestamp")
+        select_timestamp_button.clicked.connect(self._select_preview_timestamp)
+        preview_controls_layout.addWidget(select_timestamp_button)
+
+        stop_preview_button = QPushButton("Stop Preview")
+        stop_preview_button.clicked.connect(self._stop_preview)
+        preview_controls_layout.addWidget(stop_preview_button)
+
+        right_layout.addLayout(preview_controls_layout)
+
+        # Add right panel to main layout
+        main_layout.addWidget(right_panel)
+
     def _select_local_video(self):
-        """Open file dialog to select a local video file"""
-        filetypes = [
-            ('Video Files', '*.mp4 *.avi *.mov *.mkv'), 
-            ('All Files', '*.*')
-        ]
-        
-        # Open file dialog
-        selected_file = filedialog.askopenfilename(
-            title="Select a Video File",
-            filetypes=filetypes
-        )
-        
-        # If a file was selected
+        """Open file dialog to select a local video file."""
+        filetypes = "Video Files (*.mp4 *.avi *.mov *.mkv);;All Files (*.*)"
+        selected_file, _ = QFileDialog.getOpenFileName(self, "Select a Video File", "", filetypes)
+
         if selected_file:
             try:
-                # Clear YouTube URL if a local file is selected
-                self.url_entry.delete(0, tk.END)
-                
-                # Set current video path
+                self.url_entry.clear()
                 self.current_video_path = selected_file
-                
-                # Update status
                 self._update_status(f"Local video selected: {os.path.basename(selected_file)}")
-                
-                # Optional: Automatically start preview
                 self._start_video_preview("00:00:00")
             except Exception as e:
                 self._update_status(f"Error selecting video: {str(e)}", 'red')
-                messagebox.showerror("File Selection Error", str(e))
-        
-    def _setup_preview_area(self):
-        # Right Column (Video Preview)
-        preview_frame = tk.Frame(self.root)
-        preview_frame.pack(side=tk.RIGHT, padx=20, pady=20)
-        
-        tk.Label(preview_frame, text="Video Preview", font=("Helvetica", 12, "bold")).pack()
-        
-        self.preview_label = tk.Label(preview_frame)
-        self.preview_label.pack(pady=10)
-        
-        preview_controls_frame = tk.Frame(preview_frame)
-        preview_controls_frame.pack()
-        
-        tk.Button(preview_controls_frame, text="Select Timestamp", command=self._select_preview_timestamp).pack(side=tk.LEFT, padx=5)
-        tk.Button(preview_controls_frame, text="Stop Preview", command=self._stop_preview).pack(side=tk.LEFT, padx=5)
-    
-    def _select_preview_timestamp(self):
-        if not self.current_video_path:
-            messagebox.showwarning("Warning", "Please select a video first.")
-            return
-        
-        timestamp = simpledialog.askstring("Preview", "Enter timestamp (HH:MM:SS):")
-        if timestamp:
-            self._start_video_preview(timestamp)
-    
+                QMessageBox.critical(self, "File Selection Error", str(e))
+
     def _start_video_preview(self, timestamp):
-        # Stop any existing preview
+        """Start video preview from the given timestamp."""
         self._stop_preview()
-        
+
         try:
-            # Convert timestamp to seconds
             hours, minutes, seconds = map(int, timestamp.split(':'))
             total_seconds = hours * 3600 + minutes * 60 + seconds
-            
-            # Open video capture
+
             self.video_cap = cv2.VideoCapture(self.current_video_path)
             self.video_cap.set(cv2.CAP_PROP_POS_MSEC, total_seconds * 1000)
-            
-            # Start preview thread
-            self.preview_thread = threading.Thread(target=self._update_preview, daemon=True)
-            self.preview_thread.start()
+
+            self.preview_timer.start(100)  # Update every 100ms
         except Exception as e:
-            messagebox.showerror("Preview Error", str(e))
-    
+            QMessageBox.critical(self, "Preview Error", str(e))
+
     def _update_preview(self):
-        while self.video_cap and self.video_cap.isOpened():
+        """Update the video preview frame."""
+        if self.video_cap and self.video_cap.isOpened():
             ret, frame = self.video_cap.read()
-            if not ret:
-                break
-            
-            # Resize frame to fit preview
-            frame = cv2.resize(frame, (400, 600))
-            
-            # Convert frame to PhotoImage
-            cv2_img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(cv2_img)
-            photo = ImageTk.PhotoImage(image=pil_img)
-            
-            # Update preview in main thread
-            self.root.after(0, self._display_preview, photo)
-            
-            # Control frame rate
-            import time
-            time.sleep(0.1)
-    
-    def _display_preview(self, photo):
-        self.preview_label.configure(image=photo)
-        self.preview_label.image = photo  # Keep a reference
-    
+            if ret:
+                frame = cv2.resize(frame, (600, 400))
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = frame.shape
+                bytes_per_line = ch * w
+                q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                self.preview_label.setPixmap(QPixmap.fromImage(q_img))
+
     def _stop_preview(self):
+        """Stop the video preview."""
         if self.video_cap:
             self.video_cap.release()
             self.video_cap = None
-        self.preview_label.configure(image='')
-    
+        self.preview_timer.stop()
+        self.preview_label.clear()
+
     def _update_status(self, message, color='green'):
-        self.status_label.config(text=message, fg=color)
-        self.root.update_idletasks()
-    
+        """Update the status label."""
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet(f"color: {color}; font-size: 12px;")
+
     def _download_video(self):
-        url = self.url_entry.get()
+        """Download video from YouTube."""
+        url = self.url_entry.text()
         if not url:
-            messagebox.showwarning("Warning", "Please enter a YouTube URL")
+            QMessageBox.warning(self, "Warning", "Please enter a YouTube URL")
             return
-        
-        threading.Thread(target=self._threaded_download, args=(url,)).start()
-    
+
+        self._start_thread(self._threaded_download, url)
+
     def _threaded_download(self, url):
+        """Threaded function to download video."""
         try:
             self._update_status("Downloading video...", 'blue')
-            video_path = VideoProcessor.download_video(url)
+            video_path = self.video_processor.download_video(url)
             self.current_video_path = video_path
             self._update_status(f"Video downloaded: {video_path}")
-            
-            # Automatically start preview from the beginning
             self._start_video_preview("00:00:00")
         except Exception as e:
             self._update_status(f"Download Error: {str(e)}", 'red')
-            messagebox.showerror("Download Error", str(e))
-    
+            QMessageBox.critical(self, "Download Error", str(e))
+
     def _cut_video(self):
+        """Cut video based on start and end times."""
         if not self.current_video_path:
-            messagebox.showwarning("Warning", "Please select or download a video first")
+            QMessageBox.warning(self, "Warning", "Please select or download a video first")
             return
-        
-        start_time = self.start_time_entry.get()
-        end_time = self.end_time_entry.get()
-        threading.Thread(target=self._threaded_cut, args=(start_time, end_time)).start()
-    
+
+        start_time = self.start_time_entry.text()
+        end_time = self.end_time_entry.text()
+        self._start_thread(self._threaded_cut, start_time, end_time)
+
     def _threaded_cut(self, start_time, end_time):
+        """Threaded function to cut video."""
         try:
             self._update_status("Cutting video...", 'blue')
-            video_path = VideoProcessor.cut_video(self.current_video_path, start_time, end_time)
+            video_path = self.video_processor.cut_video(self.current_video_path, start_time, end_time)
             self.current_video_path = video_path
             self._update_status(f"Video cut: {video_path}")
-            
-            # Automatically start preview from the beginning of cut video
             self._start_video_preview("00:00:00")
         except Exception as e:
             self._update_status(f"Cut Error: {str(e)}", 'red')
-            messagebox.showerror("Cut Error", str(e))
-    
+            QMessageBox.critical(self, "Cut Error", str(e))
+
     def _generate_subtitles(self):
+        """Generate subtitles for the video."""
         if not self.current_video_path:
-            messagebox.showwarning("Warning", "Please select or download a video first")
+            QMessageBox.warning(self, "Warning", "Please select or download a video first")
             return
-        
-        threading.Thread(target=self._threaded_subtitles).start()
-    
+
+        self._start_thread(self._threaded_subtitles)
+
     def _threaded_subtitles(self):
+        """Threaded function to generate subtitles."""
         try:
             self._update_status("Generating subtitles...", 'blue')
-            subtitles = VideoProcessor.generate_subtitles(self.current_video_path)
+            subtitles = self.video_processor.generate_subtitles(self.current_video_path)
             self._update_status(f"Subtitles generated: {subtitles}")
         except Exception as e:
             self._update_status(f"Subtitle Error: {str(e)}", 'red')
-            messagebox.showerror("Subtitle Error", str(e))
-    
+            QMessageBox.critical(self, "Subtitle Error", str(e))
+
     def _add_subtitles(self):
+        """Add subtitles to the video."""
         if not self.current_video_path:
-            messagebox.showwarning("Warning", "Please select or download a video first")
+            QMessageBox.warning(self, "Warning", "Please select or download a video first")
             return
-        
-        threading.Thread(target=self._threaded_add_subtitles).start()
-    
+
+        self._start_thread(self._threaded_add_subtitles)
+
     def _threaded_add_subtitles(self):
+        """Threaded function to add subtitles."""
         try:
             self._update_status("Adding subtitles...", 'blue')
-            final_video = VideoProcessor.add_subtitles(self.current_video_path, "subtitles.srt")
+            final_video = self.video_processor.add_subtitles(self.current_video_path, "subtitles.srt")
             self._update_status(f"Final video created: {final_video}")
         except Exception as e:
             self._update_status(f"Subtitle Add Error: {str(e)}", 'red')
-            messagebox.showerror("Subtitle Add Error", str(e))
-    
+            QMessageBox.critical(self, "Subtitle Add Error", str(e))
+
+    def _start_thread(self, target, *args):
+        """Start a new thread for a task."""
+        thread = QThread(target=target, args=args)
+        thread.start()
+
     def run(self):
-        self.root.mainloop()
+        """Run the application."""
+        self.show()
+
 
 def launch_gui():
+    """Launch the GUI application."""
+    import sys
+    app = QApplication(sys.argv)
     whisper.load_model("medium")  # Pre-load Whisper model
-    app = VideoProcessingGUI()
-    app.run()
+    gui = VideoProcessingGUI()
+    gui.run()
+    sys.exit(app.exec_())
