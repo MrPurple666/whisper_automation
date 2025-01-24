@@ -7,6 +7,55 @@ from yt_dlp import YoutubeDL
 import whisper
 import ffmpeg
 
+# Standalone C function for writing SRT (defined at module level)
+cdef void _whisper_to_srt_c(dict whisper_result, const char* subtitles_path) nogil:
+    """Internal C function for writing SRT."""
+    cdef FILE* file
+    cdef int i, hours, minutes, secs, millis
+    cdef int end_hours, end_minutes, end_secs, end_millis
+    cdef double start, end
+    cdef const char* text
+    cdef int num_segments
+
+    file = fopen(subtitles_path, "w")
+    if not file:
+        with gil:
+            raise IOError("Could not open subtitles file.")
+
+    try:
+        with gil:
+            segments = whisper_result["segments"]  # Access Python object with GIL
+            num_segments = len(segments)  # Get the length inside the GIL block
+
+        for i in range(num_segments):  # Use the precomputed length
+            with gil:
+                segment = segments[i]  # Access Python object with GIL
+                start = segment["start"]  # Access Python object with GIL
+                end = segment["end"]  # Access Python object with GIL
+                text_py = segment["text"].strip()  # Store in a Python variable
+                text_bytes = text_py.encode('utf-8')  # Store the bytes object in a Python variable
+                text = text_bytes  # Assign the C pointer to the internal data of the bytes object
+
+            # Convert times (no GIL needed for pure C operations)
+            hours = <int>(start // 3600)
+            minutes = <int>((start % 3600) // 60)
+            secs = <int>(start % 60)
+            millis = <int>((start - <int>start) * 1000)
+
+            end_hours = <int>(end // 3600)
+            end_minutes = <int>((end % 3600) // 60)
+            end_secs = <int>(end % 60)
+            end_millis = <int>((end - <int>end) * 1000)
+
+            # Write to file (no GIL needed for C file operations)
+            fprintf(file, b"%d\n", i + 1)
+            fprintf(file, b"%02d:%02d:%02d,%03d --> %02d:%02d:%02d,%03d\n",
+                    hours, minutes, secs, millis,
+                    end_hours, end_minutes, end_secs, end_millis)
+            fprintf(file, b"%s\n\n", text)
+    finally:
+        fclose(file)
+
 # Cython optimized functions
 cdef class VideoProcessor:
     cpdef str download_video(self, str video_url, str output_path="video.mp4"):
@@ -62,46 +111,7 @@ cdef class VideoProcessor:
         """Convert Whisper transcription to SRT format."""
         cdef bytes path_bytes = subtitles_path.encode('utf-8')
         cdef const char* c_path = path_bytes
-        self._whisper_to_srt_c(whisper_result, c_path)
-
-    cdef void _whisper_to_srt_c(self, dict whisper_result, const char* subtitles_path) nogil:
-        """Internal C function for writing SRT."""
-        cdef FILE* file
-        cdef int i, hours, minutes, secs, millis
-        cdef int end_hours, end_minutes, end_secs, end_millis
-        cdef double start, end
-        cdef const char* text
-
-        file = fopen(subtitles_path, "w")
-        if not file:
-            with gil:
-                raise IOError("Could not open subtitles file.")
-
-        try:
-            for i, segment in enumerate(whisper_result["segments"]):
-                start = segment["start"]
-                end = segment["end"]
-                text = segment["text"].strip().encode('utf-8')
-
-                # Convert times
-                hours = <int>(start // 3600)
-                minutes = <int>((start % 3600) // 60)
-                secs = <int>(start % 60)
-                millis = <int>((start - <int>start) * 1000)
-
-                end_hours = <int>(end // 3600)
-                end_minutes = <int>((end % 3600) // 60)
-                end_secs = <int>(end % 60)
-                end_millis = <int>((end - <int>end) * 1000)
-
-                # Write to file
-                fprintf(file, b"%d\n", i + 1)
-                fprintf(file, b"%02d:%02d:%02d,%03d --> %02d:%02d:%02d,%03d\n",
-                        hours, minutes, secs, millis,
-                        end_hours, end_minutes, end_secs, end_millis)
-                fprintf(file, b"%s\n\n", text)
-        finally:
-            fclose(file)
+        _whisper_to_srt_c(whisper_result, c_path)  # Call the standalone C function
 
     cpdef str add_subtitles(self, str video_path, str subtitles_path, str output_path="final_output.mp4"):
         """Add subtitles to video using python-ffmpeg."""

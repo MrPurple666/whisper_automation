@@ -11,18 +11,7 @@ import os
 import cv2
 import numpy as np
 
-cdef class VideoProcessingGUI(QMainWindow):
-    cdef object video_processor
-    cdef str current_video_path
-    cdef object video_cap
-    cdef object preview_timer
-    cdef object status_label
-    cdef object preview_label
-    cdef object progress_bar
-    cdef object url_entry
-    cdef object start_time_entry
-    cdef object end_time_entry
-
+class VideoProcessingGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.video_processor = VideoProcessor()
@@ -88,7 +77,7 @@ cdef class VideoProcessingGUI(QMainWindow):
 
         # Buttons
         download_button = QPushButton("Download Video")
-        download_button.clicked.connect(self._download_video)
+        download_button.clicked.connect(self.download_video)  # Corrected method name
         left_layout.addWidget(download_button)
 
         cut_button = QPushButton("Cut Video")
@@ -193,12 +182,21 @@ cdef class VideoProcessingGUI(QMainWindow):
         self.preview_timer.stop()
         self.preview_label.clear()
 
+    def _select_preview_timestamp(self):
+        """Open a dialog to select a timestamp for the video preview."""
+        timestamp, ok = QInputDialog.getText(self, "Select Timestamp", "Enter timestamp (HH:MM:SS):")
+        if ok and timestamp:
+            try:
+                self._start_video_preview(timestamp)
+            except Exception as e:
+                QMessageBox.critical(self, "Timestamp Error", str(e))
+
     def _update_status(self, message, color='green'):
         """Update the status label."""
         self.status_label.setText(message)
         self.status_label.setStyleSheet(f"color: {color}; font-size: 12px;")
 
-    def _download_video(self):
+    def download_video(self, checked=False):
         """Download video from YouTube."""
         url = self.url_entry.text()
         if not url:
@@ -219,7 +217,7 @@ cdef class VideoProcessingGUI(QMainWindow):
             self._update_status(f"Download Error: {str(e)}", 'red')
             QMessageBox.critical(self, "Download Error", str(e))
 
-    def _cut_video(self):
+    def _cut_video(self, checked=False):
         """Cut video based on start and end times."""
         if not self.current_video_path:
             QMessageBox.warning(self, "Warning", "Please select or download a video first")
@@ -241,7 +239,7 @@ cdef class VideoProcessingGUI(QMainWindow):
             self._update_status(f"Cut Error: {str(e)}", 'red')
             QMessageBox.critical(self, "Cut Error", str(e))
 
-    def _generate_subtitles(self):
+    def _generate_subtitles(self, checked=False):
         """Generate subtitles for the video."""
         if not self.current_video_path:
             QMessageBox.warning(self, "Warning", "Please select or download a video first")
@@ -259,7 +257,7 @@ cdef class VideoProcessingGUI(QMainWindow):
             self._update_status(f"Subtitle Error: {str(e)}", 'red')
             QMessageBox.critical(self, "Subtitle Error", str(e))
 
-    def _add_subtitles(self):
+    def _add_subtitles(self, checked=False):
         """Add subtitles to the video."""
         if not self.current_video_path:
             QMessageBox.warning(self, "Warning", "Please select or download a video first")

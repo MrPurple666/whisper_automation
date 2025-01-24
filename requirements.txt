@@ -5,8 +5,8 @@ whisper
 yt_dlp
 python-ffmpeg
 numba
-torch #Broken on 3.13, whisper dependencie
-torchaudio #Broken on 3.13, whisper dependencie
+#torch #Broken on 3.13, whisper dependencie
+#torchaudio #Broken on 3.13, whisper dependencie
 setuptools
 PyQt5
-opencv-python
+opencv-python-headless
