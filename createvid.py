@@ -1,138 +1,168 @@
 import os
-import subprocess
+import logging
+from typing import Optional, Dict, Any
 from yt_dlp import YoutubeDL
 import whisper
+from ffmpeg import FFmpeg, Progress
 
+# Configuração do logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def download_video(video_url, output_path="video.mp4"):
-    """Baixa o vídeo do YouTube usando yt-dlp."""
-    ydl_opts = {
-        'format': 'mp4',
-        'outtmpl': output_path
-    }
-    with YoutubeDL(ydl_opts) as ydl:
-        ydl.download([video_url])
-    return output_path
+def baixar_video(video_url: str, output_path: str = "video.mp4") -> str:
+    """Baixa um vídeo do YouTube usando yt-dlp."""
+    ydl_opts = {'format': 'mp4', 'outtmpl': output_path}
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+        logger.info(f"Vídeo baixado com sucesso: {output_path}")
+        return output_path
+    except Exception as e:
+        logger.error(f"Falha ao baixar o vídeo: {e}")
+        raise
 
+def cortar_video(input_path: str, start_time: str, end_time: str, output_path: str = "output.mp4") -> str:
+    """Corta o vídeo para o formato vertical usando python-ffmpeg."""
+    try:
+        ffmpeg = (
+            FFmpeg()
+            .input(input_path, ss=start_time, to=end_time)
+            .filter("scale", 1080, 1920)  # Formato vertical (1080x1920)
+            .filter("setsar", 1, 1)       # Mantém a proporção de pixel
+            .output(
+                output_path,
+                vcodec="libx264",         # Codec de vídeo
+                preset="fast",            # Preset de codificação
+                crf=23,                   # Qualidade do vídeo
+                acodec="aac",             # Codec de áudio
+                strict="experimental",    # Modo experimental para codecs
+            )
+            .overwrite_output()           # Sobrescreve o arquivo de saída se existir
+        )
 
-def cut_video(input_path, start_time, end_time, output_path="output.mp4"):
-    """Corta o vídeo usando FFmpeg para o formato vertical."""
-    command = [
-        "ffmpeg",
-        "-i", input_path,
-        "-ss", start_time,
-        "-to", end_time,
-        "-vf", "scale=1080:1920,setsar=1:1",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-c:a", "aac",
-        "-strict", "experimental",
-        output_path
-    ]
-    subprocess.run(command, check=True)
-    return output_path
+        # Opcional: Acompanhamento do progresso
+        @ffmpeg.on("progress")
+        def on_progress(progress: Progress):
+            logger.info(f"Processando frame {progress.frame} de {progress.total_frames}")
 
+        ffmpeg.execute()
+        logger.info(f"Vídeo cortado com sucesso: {output_path}")
+        return output_path
+    except Exception as e:
+        logger.error(f"Falha ao cortar o vídeo: {e}")
+        raise
 
-def whisper_to_srt(whisper_result, subtitles_path):
+def whisper_para_srt(whisper_result: Dict[str, Any], subtitles_path: str) -> None:
     """Converte a transcrição do Whisper para o formato SRT."""
-    with open(subtitles_path, "w", encoding="utf-8") as f:
-        for i, segment in enumerate(whisper_result["segments"]):
-            start = segment["start"]
-            end = segment["end"]
-            text = segment["text"].strip()
+    try:
+        with open(subtitles_path, "w", encoding="utf-8") as f:
+            for i, segment in enumerate(whisper_result["segments"]):
+                start = segment["start"]
+                end = segment["end"]
+                texto = segment["text"].strip()
 
-            # Converter para formato HH:MM:SS,MMM
-            def format_time(seconds):
-                hours = int(seconds // 3600)
-                minutes = int((seconds % 3600) // 60)
-                secs = seconds % 60
-                millis = int((secs - int(secs)) * 1000)
-                return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{millis:03d}"
+                def formatar_tempo(seconds: float) -> str:
+                    horas = int(seconds // 3600)
+                    minutos = int((seconds % 3600) // 60)
+                    segundos = seconds % 60
+                    milissegundos = int((segundos - int(segundos)) * 1000)
+                    return f"{horas:02d}:{minutos:02d}:{int(segundos):02d},{milissegundos:03d}"
 
-            f.write(f"{i + 1}\n")
-            f.write(f"{format_time(start)} --> {format_time(end)}\n")
-            f.write(f"{text}\n\n")
+                f.write(f"{i + 1}\n")
+                f.write(f"{formatar_tempo(start)} --> {formatar_tempo(end)}\n")
+                f.write(f"{texto}\n\n")
+        logger.info(f"Legendas geradas com sucesso: {subtitles_path}")
+    except Exception as e:
+        logger.error(f"Falha ao gerar legendas: {e}")
+        raise
 
+def gerar_legendas(input_path: str, model: str = "medium") -> str:
+    """Gera legendas usando o Whisper."""
+    logger.info("Carregando o modelo Whisper...")
+    try:
+        whisper_model = whisper.load_model(model)
+        logger.info("Transcrevendo o áudio...")
+        resultado = whisper_model.transcribe(input_path)
+        subtitles_path = "legendas.srt"
+        whisper_para_srt(resultado, subtitles_path)
+        return subtitles_path
+    except Exception as e:
+        logger.error(f"Falha ao transcrever o áudio: {e}")
+        raise
 
-def generate_subtitles(input_path, model="medium"):
-    """Gera legendas usando Whisper e salva no formato SRT."""
-    print("Carregando o modelo Whisper...")
-    whisper_model = whisper.load_model(model)
-    print("Transcrevendo o áudio do vídeo...")
-    result = whisper_model.transcribe(input_path)
+def validar_formato_srt(subtitles_path: str) -> None:
+    """Valida o formato do arquivo SRT."""
+    try:
+        with open(subtitles_path, 'r', encoding='utf-8') as f:
+            linhas = f.readlines()
+        
+        for i, linha in enumerate(linhas):
+            if "-->" in linha:
+                timestamps = linha.split("-->")
+                if len(timestamps) != 2:
+                    raise ValueError(f"Formato de tempo inválido na linha {i + 1}: {linha}")
+        logger.info("Arquivo SRT validado com sucesso.")
+    except Exception as e:
+        logger.error(f"Falha ao validar o arquivo SRT: {e}")
+        raise
 
-    subtitles_path = "subtitles.srt"
-    whisper_to_srt(result, subtitles_path)
-    print("Legendas geradas com sucesso.")
-    return subtitles_path
+def adicionar_legendas(video_path: str, subtitles_path: str, output_path: str = "final_output.mp4") -> str:
+    """Adiciona legendas ao vídeo usando python-ffmpeg."""
+    try:
+        validar_formato_srt(subtitles_path)
+        caminho_absoluto_legendas = os.path.abspath(subtitles_path)
 
+        ffmpeg = (
+            FFmpeg()
+            .input(video_path)
+            .output(
+                output_path,
+                vf=f"subtitles='{caminho_absoluto_legendas}'",  # Filtro de legendas
+                vcodec="libx264",  # Codec de vídeo
+                crf=23,            # Qualidade do vídeo
+                preset="fast",     # Preset de codificação
+                acodec="aac",      # Codec de áudio
+            )
+            .overwrite_output()    # Sobrescreve o arquivo de saída se existir
+        )
 
-def validate_srt_format(subtitles_path):
-    """Valida o formato SRT."""
-    with open(subtitles_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    
-    for i, line in enumerate(lines):
-        if "-->" in line:
-            timestamps = line.split("-->")
-            if len(timestamps) != 2:
-                raise ValueError(f"Erro no formato de tempo na linha {i + 1}: {line}")
-    print("Arquivo .srt validado com sucesso.")
+        # Opcional: Acompanhamento do progresso
+        @ffmpeg.on("progress")
+        def on_progress(progress: Progress):
+            logger.info(f"Processando frame {progress.frame} de {progress.total_frames}")
 
+        ffmpeg.execute()
+        logger.info(f"Legendas adicionadas com sucesso: {output_path}")
+        return output_path
+    except Exception as e:
+        logger.error(f"Falha ao adicionar legendas: {e}")
+        raise
 
-def add_subtitles(video_path, subtitles_path, output_path="final_output.mp4"):
-    """Adiciona legendas ao vídeo usando FFmpeg."""
-    if not os.path.exists(subtitles_path):
-        raise FileNotFoundError("O arquivo de legendas 'subtitles.srt' não foi encontrado.")
-    
-    # Validar o formato do arquivo SRT
-    validate_srt_format(subtitles_path)
-
-    # Caminho absoluto para evitar problemas
-    abs_subtitles_path = os.path.abspath(subtitles_path)
-    command = [
-        "ffmpeg",
-        "-i", video_path,
-        "-vf", f"subtitles='{abs_subtitles_path}'",
-        "-c:v", "libx264",
-        "-crf", "23",
-        "-preset", "fast",
-        "-c:a", "aac",
-        output_path
-    ]
-    subprocess.run(command, check=True)
-    return output_path
-
-
-def main():
-    # Pede o link do vídeo
-    video_url = input("Digite o link do vídeo do YouTube: ")
-    
-    # Baixa o vídeo
-    print("Baixando o vídeo...")
-    input_video = download_video(video_url)
-    
-    # Pede os tempos de corte
-    start_time = input("Digite o tempo de início (formato HH:MM:SS): ")
-    end_time = input("Digite o tempo de término (formato HH:MM:SS): ")
-    
-    # Corta o vídeo
-    print("Cortando o vídeo para o formato Shorts...")
-    cut_video_path = "short_video.mp4"
-    cut_video(input_video, start_time, end_time, cut_video_path)
-    
-    # Gera legendas
-    print("Gerando legendas com o modelo medium do Whisper...")
-    subtitles_path = generate_subtitles(cut_video_path, model="medium")
-    
-    # Adiciona legendas ao vídeo
-    print("Adicionando legendas ao vídeo...")
-    final_video_path = "final_short.mp4"
-    add_subtitles(cut_video_path, subtitles_path, final_video_path)
-    
-    print(f"Vídeo final criado: {final_video_path}")
-
+def main() -> None:
+    """Função principal para processar o vídeo."""
+    try:
+        video_url = input("Digite o link do vídeo do YouTube: ")
+        
+        logger.info("Baixando o vídeo...")
+        input_video = baixar_video(video_url)
+        
+        start_time = input("Digite o tempo de início (formato HH:MM:SS): ")
+        end_time = input("Digite o tempo de término (formato HH:MM:SS): ")
+        
+        logger.info("Cortando o vídeo para o formato Shorts...")
+        cut_video_path = "short_video.mp4"
+        cortar_video(input_video, start_time, end_time, cut_video_path)
+        
+        logger.info("Gerando legendas com o modelo medium do Whisper...")
+        subtitles_path = gerar_legendas(cut_video_path)
+        
+        logger.info("Adicionando legendas ao vídeo...")
+        final_video_path = "final_short.mp4"
+        adicionar_legendas(cut_video_path, subtitles_path, final_video_path)
+        
+        logger.info(f"Vídeo final criado: {final_video_path}")
+    except Exception as e:
+        logger.error(f"Erro durante o processamento: {e}")
 
 if __name__ == "__main__":
     main()
