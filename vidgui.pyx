@@ -4,12 +4,31 @@ from PyQt5.QtWidgets import (
     QProgressBar, QFileDialog, QMessageBox, QFrame, QInputDialog
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 from createvid import VideoProcessor
 import whisper
 import os
 import cv2
 import numpy as np
+
+class DownloadThread(QThread):
+    download_finished = pyqtSignal(str)  # Signal to indicate download completion
+
+    def __init__(self, url, video_processor, status_callback):
+        super().__init__()
+        self.url = url
+        self.video_processor = video_processor
+        self.status_callback = status_callback
+
+    def run(self):
+        try:
+            self.status_callback("Downloading video...", 'blue')
+            video_path = self.video_processor.download_video(self.url)
+            self.status_callback(f"Video downloaded: {video_path}")
+            self.download_finished.emit(video_path)  # Emit signal with video path
+        except Exception as e:
+            self.status_callback(f"Download Error: {str(e)}", 'red')
 
 class VideoProcessingGUI(QMainWindow):
     def __init__(self):
@@ -203,19 +222,14 @@ class VideoProcessingGUI(QMainWindow):
             QMessageBox.warning(self, "Warning", "Please enter a YouTube URL")
             return
 
-        self._start_thread(self._threaded_download, url)
+        self.download_thread = DownloadThread(url, self.video_processor, self._update_status)
+        self.download_thread.download_finished.connect(self._handle_download_finished)  # Connect signal
+        self.download_thread.start()
 
-    def _threaded_download(self, url):
-        """Threaded function to download video."""
-        try:
-            self._update_status("Downloading video...", 'blue')
-            video_path = self.video_processor.download_video(url)
-            self.current_video_path = video_path
-            self._update_status(f"Video downloaded: {video_path}")
-            self._start_video_preview("00:00:00")
-        except Exception as e:
-            self._update_status(f"Download Error: {str(e)}", 'red')
-            QMessageBox.critical(self, "Download Error", str(e))
+    def _handle_download_finished(self, video_path):
+        """Handle the download finished signal."""
+        self.current_video_path = video_path
+        self._start_video_preview("00:00:00")
 
     def _cut_video(self, checked=False):
         """Cut video based on start and end times."""
